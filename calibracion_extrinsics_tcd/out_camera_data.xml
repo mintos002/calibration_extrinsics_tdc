@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<opencv_storage>
+<calibration_Time>"Mon Jun 17 13:30:04 2019"</calibration_Time>
+<nrOfFrames>28</nrOfFrames>
+<thermal_image_Width>640</thermal_image_Width>
+<thermal_image_Height>480</thermal_image_Height>
+<color_image_Width>1280</color_image_Width>
+<color_image_Height>720</color_image_Height>
+<Thermal_Camera_Matrix type_id="opencv-matrix">
+  <rows>3</rows>
+  <cols>3</cols>
+  <dt>d</dt>
+  <data>
+    1.4742938840468862e+03 0. 3.1756089343542959e+02 0.
+    1.4733007619448651e+03 2.2048046123203488e+02 0. 0. 1.</data></Thermal_Camera_Matrix>
+<Thermal_Distortion_Coefficients type_id="opencv-matrix">
+  <rows>5</rows>
+  <cols>1</cols>
+  <dt>d</dt>
+  <data>
+    -1.6790813367495100e-01 1.0510755510306520e-01
+    1.9783319429428144e-04 -2.4572641612595216e-03
+    1.0158442758530743e+01</data></Thermal_Distortion_Coefficients>
+<Color_Camera_Matrix type_id="opencv-matrix">
+  <rows>3</rows>
+  <cols>3</cols>
+  <dt>d</dt>
+  <data>
+    9.2656872558593750e+02 0. 6.3664056396484375e+02 0.
+    9.2728430175781250e+02 3.7243283081054688e+02 0. 0. 1.</data></Color_Camera_Matrix>
+<Color_Distortion_Coefficients type_id="opencv-matrix">
+  <rows>5</rows>
+  <cols>1</cols>
+  <dt>d</dt>
+  <data>
+    0. 0. 0. 0. 0.</data></Color_Distortion_Coefficients>
+<Thermal_Avg_Reprojection_Error>4.4246439300373891e-01</Thermal_Avg_Reprojection_Error>
+</opencv_storage>

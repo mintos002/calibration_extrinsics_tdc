@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.329
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "calibracion_extrinsics_tcd", "calibracion_extrinsics_tcd\calibracion_extrinsics_tcd.vcxproj", "{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Debug|x64.ActiveCfg = Debug|x64
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Debug|x64.Build.0 = Debug|x64
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Debug|x86.ActiveCfg = Debug|Win32
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Debug|x86.Build.0 = Debug|Win32
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Release|x64.ActiveCfg = Release|x64
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Release|x64.Build.0 = Release|x64
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Release|x86.ActiveCfg = Release|Win32
+		{99BFDD6C-B4F2-4642-B3D8-265F79645ABD}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {27EA512D-D2F9-4CF2-8D12-7042B6C84705}
+	EndGlobalSection
+EndGlobal
