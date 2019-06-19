@@ -13,6 +13,7 @@
 #include "opencv2/features2d/features2d.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio/videoio.hpp"
+#include "opencv2/imgcodecs.hpp"
 
 #include "librealsense2/rs.hpp"
 
@@ -78,6 +79,44 @@ bool get_images_path(std::string path, stringvec& images)
 		return false;
 	}
 	return true;
+}
+
+void process_image(int flipMode, int negMode, cv::Mat& t_img, cv::Mat& c_img)
+{
+	// Flip
+	cv::Mat t;
+	cv::Mat img;
+	switch (flipMode)
+	{
+	case 1:
+		cv::flip(t_img, t, 1);
+		c_img = t.clone();
+		break;
+	case 2:
+		cv::flip(c_img, img, 1);
+		c_img = img.clone();
+		break;
+	case 3:
+		cv::flip(t_img, t, 1);
+		t_img = t;
+		cv::flip(c_img, img, 1);
+		c_img = img.clone();
+		break;
+	}
+	// Negative
+	switch (negMode)
+	{
+	case 1:
+		cv::bitwise_not(t_img, t_img);
+		break;
+	case 2:
+		cv::bitwise_not(c_img, c_img);
+		break;
+	case 3:
+		cv::bitwise_not(t_img, t_img);
+		cv::bitwise_not(c_img, c_img);
+		break;
+	}
 }
 
 bool get_stereo_images_list(std::string t_path, std::string c_path, stringvec& t_images, stringvec& c_images/*, stringvec& shared_images*/)
@@ -311,7 +350,6 @@ static void saveCameraParams(std::string outputFileName, cv::Size& t_imageSize, 
 	fs << "Total_Reprojection_Error" << rms;
 
 	fs.release();
-
 }
 
 bool runCalibrationAndSave(std::string outputFileName, cv::Size boardSize, float squareSize, cv::Size t_imageSize, cv::Mat&  t_cameraMatrix, cv::Mat& t_distCoeffs, std::vector<std::vector<cv::Point2f>> t_imagePoints, 
@@ -333,6 +371,14 @@ bool runCalibrationAndSave(std::string outputFileName, cv::Size boardSize, float
 			c_imageSize, c_cameraMatrix, c_distCoeffs, c_imagePoints, R, T, E, F, rms);
 		return ok;
 }
+void pRegistration(const cv::Mat& inputDataC1,
+	const cv::Matx33f& cameraMatrixC1,
+	const cv::Matx33f& cameraMatrixC2,
+	const cv::Mat_<float>& distCoeffC2,
+	const cv::Mat& R, const cv::Mat& T,
+	const cv::Size imagePlaneC2,
+	const bool depthDilatationC1,
+	cv::Mat& registeredResultC1);
 
 // MAIN ---------------------------------------------------------------------------
 int main(int argc, char* argv[])
@@ -539,40 +585,7 @@ int main(int argc, char* argv[])
 
 		//Image process
 		// Modify images
-		// Flip
-		cv::Mat t;
-		cv::Mat img;
-		switch (flip_mode)
-		{
-		case 1:
-			cv::flip(t_frame, t, 1);
-			t_frame = t.clone();
-			break;
-		case 2:
-			cv::flip(c_frame, img, 1);
-			c_frame = img.clone();
-			break;
-		case 3:
-			cv::flip(t_frame, t, 1);
-			t_frame = t;
-			cv::flip(c_frame, img, 1);
-			c_frame = img.clone();
-			break;
-		}
-		// Negative
-		switch (negative_mode)
-		{
-		case 1:
-			cv::bitwise_not(t_frame, t_frame);
-			break;
-		case 2:
-			cv::bitwise_not(c_frame, c_frame);
-			break;
-		case 3:
-			cv::bitwise_not(t_frame, t_frame);
-			cv::bitwise_not(c_frame, c_frame);
-			break;
-		}
+		process_image(flip_mode, negative_mode, t_frame, c_frame);
 
 		// convert to 8bit
 		t_frame.convertTo(t_frame, CV_8UC1, 1 / 256.0);
@@ -616,11 +629,100 @@ int main(int argc, char* argv[])
 			cv::imshow("Color camera", c_frame);
 		}
 		
-		char key = (char)cv::waitKey(50);
+		char key = (char)cv::waitKey(25);
 
 		if (key == 27)
 		{
 			break;
+		}
+	}
+
+	cv::destroyAllWindows();
+	if (calib_done)
+	{
+		printf("\nStart Registered image visualization ...\n");
+		printf
+		(
+			"- Press ESC to exit.\n"
+			"- Press any key to visualize the next image.\n"
+		);
+		for (int i = 0; i < thermo_images_path.size(); i++)
+		{
+			cv::Mat t_frame;
+			cv::Mat c_frame;
+			
+			t_frame = cv::imread(thermo_images_path[i], cv::IMREAD_ANYDEPTH);
+			c_frame = cv::imread(color_images_path[i], cv::IMREAD_COLOR);
+			
+            process_image(flip_mode, negative_mode, t_frame, c_frame);
+			// convert to 8bit
+			t_frame.convertTo(t_frame, CV_8UC1, 1 / 256.0);
+
+			cv::Mat registeredResult;
+			bool dilatationC1 = false;
+
+			cv::Mat tR, cR, tP, cP, Q;
+			cv::Mat rgbdt;
+			double alpha = 0.5;
+			double beta = (1.0 - alpha);
+			cv::Mat cc;
+			/*cv::cvtColor(t_frame, cc, CV_GRAY2RGB);
+			cc = c_frame.clone();*/
+			cv::Rect tRoi, cRoi;
+
+			cv::stereoRectify(in_thermal_camaeraMatrix, in_thermal_distCoeff, in_color_cameraMatrix, in_color_distCoeff, t_imageSize, R, T, tR, cR, tP, cP, Q, CV_CALIB_ZERO_DISPARITY, -1, c_imageSize, &tRoi, &cRoi);
+			
+			cv::Mat rmap[2][2];
+			//Precompute maps for cv::remap()
+			initUndistortRectifyMap(in_thermal_camaeraMatrix, in_thermal_distCoeff, tR, tP, t_imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
+			initUndistortRectifyMap(in_color_cameraMatrix, in_color_distCoeff, cR, cP, c_imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
+
+			cv::Mat canvas;
+			double sf;
+			int w, h;
+
+			sf = 600. / MAX(c_imageSize.width, c_imageSize.height);
+			w = cvRound(c_imageSize.width*sf);
+			h = cvRound(c_imageSize.height*sf);
+			canvas.create(h, w * 2, CV_8UC3);
+			
+			cv::Mat timg, cimg;
+ 			cv::remap(t_frame, timg, rmap[0][0], rmap[0][1], CV_INTER_LINEAR);
+			cvtColor(t_frame, timg, cv::COLOR_GRAY2BGR);
+			cv::remap(c_frame, cimg, rmap[1][0], rmap[1][1], CV_INTER_LINEAR);
+			//cvtColor(c_frame, cimg, cv::COLOR_GRAY2BGR);
+
+			t_frame = timg.clone();
+			c_frame = cimg.clone();
+				
+			for (int j = 0; j < canvas.rows; j += 16)
+				line(canvas, cv::Point(0, j), cv::Point(canvas.cols, j), cv::Scalar(0, 255, 0), 1, 8);
+				
+		
+			if (t_frame.empty() == false)
+			{
+				cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
+				cv::imshow("Thermal camera", t_frame);
+			}
+			if (c_frame.empty() == false)
+			{
+				cv::namedWindow("Color camera", cv::WINDOW_AUTOSIZE);
+				cv::imshow("Color camera", c_frame);
+			}
+			
+
+			/*cv::addWeighted(c_frame, alpha, cc, beta, 0.0, rgbdt);
+
+			cv::namedWindow("Overlay", cv::WINDOW_AUTOSIZE);
+			cv::imshow("Overlay", rgbdt);*/
+
+			char key = (char)cv::waitKey(0);
+
+			if (key == 27)
+			{
+				break;
+			}
+			
 		}
 	}
 	cv::destroyAllWindows();
