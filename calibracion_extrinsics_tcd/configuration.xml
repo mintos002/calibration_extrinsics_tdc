@@ -12,12 +12,12 @@
                       |     |-> t_20196141560502490749.png
                       |     |-> ...                       
             set the images path surrounded by "". For example: "C:\dir\thermo" -->
-  <PathThermoImages>""</PathThermoImages>
-  <PathColorImages>""</PathColorImages>
+  <PathThermoImages>"C:\Users\aljuasin\Desktop\captura_tcd\output_images_640\thermo"</PathThermoImages>
+  <PathColorImages>"C:\Users\aljuasin\Desktop\captura_tcd\output_images_640\color"</PathColorImages>
   <!-- Path to the .xml file of calibration parameters (the output of calibration_tcd app) -->
-  <InputPath>"out_camera_data_1280.xml"</InputPath>
+  <InputPath>"out_camera_intrinsics_640.xml"</InputPath>
   <!-- Path to the .xml output file that this app will generate -->
-  <OutputPath>"out_camera_data_extrinsics.xml"</OutputPath>
+  <OutputPath>"out_camera_data_extrinsics_try_.xml"</OutputPath>
   
   <!-- Delete all files of the output_images file in Path
         - 0 do not delete (default)

@@ -300,7 +300,7 @@ static bool runStereoCalibration(cv::Size boardSize, float squareSize, cv::Size&
 	objectPoints.resize(imagePoints1.size(), objectPoints[0]);
 
 	//Find intrinsic and extrinsic camera parameters
-	rms = cv::stereoCalibrate(objectPoints, imagePoints1, imagePoints2, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, imageSize, R, T, E, F, CV_CALIB_FIX_INTRINSIC);
+	rms = cv::stereoCalibrate(objectPoints, imagePoints1, imagePoints2, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, imageSize, R, T, E, F, CV_CALIB_USE_INTRINSIC_GUESS /*CV_CALIB_FIX_INTRINSIC*/);
 
 	std::cout << "Re-projection error reported by calibrateCamera: " << rms << std::endl;
 
@@ -380,6 +380,9 @@ void pRegistration(const cv::Mat& inputDataC1,
 	const bool depthDilatationC1,
 	cv::Mat& registeredResultC1);
 
+void computeC2MC1(const cv::Mat &R1, const cv::Mat &tvec1, const cv::Mat &R2, const cv::Mat &tvec2,
+	cv::Mat &R_1to2, cv::Mat &tvec_1to2);
+
 // MAIN ---------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
@@ -396,7 +399,7 @@ int main(int argc, char* argv[])
 	int cd_fps = 30;
 	int board_width;
 	int board_height;
-	float squareSize = 2.0;
+	float squareSize = 20.0;
 
 	int flip_mode = 0;
 	int negative_mode = 0;
@@ -590,6 +593,11 @@ int main(int argc, char* argv[])
 		// convert to 8bit
 		t_frame.convertTo(t_frame, CV_8UC1, 1 / 256.0);
 
+		/*cv::Mat temp1 = t_frame.clone();
+		cv::Mat temp2 = c_frame.clone();
+		t_frame = temp2.clone();
+		c_frame = temp1.clone();*/
+
 		std::vector<cv::Point2f> t_pointBuf;
 		std::vector<cv::Point2f> c_pointBuf;
 		bool t_found;
@@ -658,6 +666,11 @@ int main(int argc, char* argv[])
 			// convert to 8bit
 			t_frame.convertTo(t_frame, CV_8UC1, 1 / 256.0);
 
+			/*cv::Mat temp1 = t_frame.clone();
+			cv::Mat temp2 = c_frame.clone();
+			t_frame = temp2.clone();
+			c_frame = temp1.clone();*/
+
 			cv::Mat registeredResult;
 			bool dilatationC1 = false;
 
@@ -666,37 +679,72 @@ int main(int argc, char* argv[])
 			double alpha = 0.5;
 			double beta = (1.0 - alpha);
 			cv::Mat cc;
+
+			std::vector<std::vector<cv::Point3f>> objectPoints(1);
+			calcBoardCornerPositions(patternsize, squareSize, objectPoints[0]/*, cv::CALIB_CB_ASYMMETRIC_GRID*/);
+			objectPoints.resize(t_imagePoints.size(), objectPoints[0]);
+
+			cv::Mat rvec_t, tvec_t;
+			cv::solvePnP(objectPoints, t_imagePoints, in_thermal_camaeraMatrix, in_thermal_distCoeff, rvec_t, tvec_t);
+			cv::Mat rvec_c, tvec_c;
+			cv::solvePnP(objectPoints, c_imagePoints, in_color_cameraMatrix, in_color_distCoeff, rvec_c, tvec_c);
+
+			cv::Mat R_t, R_c, T_t, T_c;
+			cv::Rodrigues(rvec_t, R_t);
+			cv::Rodrigues(tvec_t, T_t);
+			cv::Rodrigues(rvec_c, R_c);
+			cv::Rodrigues(tvec_c, T_c);
+
+			cv::Mat normal = (cv::Mat_<double>(3, 1) << 0, 0, 1);
+			cv::Mat normal1 = R_t * normal;
+
+			cv::Mat origin(3, 1, CV_64F, cv::Scalar(0));
+			cv::Mat origin1 = R_t * origin + tvec_t;
+			double d_inv1 = 1.0 / normal1.dot(origin1);
+
+
+
+
 			/*cv::cvtColor(t_frame, cc, CV_GRAY2RGB);
 			cc = c_frame.clone();*/
-			cv::Rect tRoi, cRoi;
+			//cv::Rect tRoi, cRoi;
 
-			cv::stereoRectify(in_thermal_camaeraMatrix, in_thermal_distCoeff, in_color_cameraMatrix, in_color_distCoeff, t_imageSize, R, T, tR, cR, tP, cP, Q, CV_CALIB_ZERO_DISPARITY, -1, c_imageSize, &tRoi, &cRoi);
+			//cv::stereoRectify(in_thermal_camaeraMatrix, in_thermal_distCoeff, in_color_cameraMatrix, in_color_distCoeff, t_imageSize, R, T, tR, cR, tP, cP, Q, CV_CALIB_ZERO_DISPARITY, -1, c_imageSize, &tRoi, &cRoi);
 			
-			cv::Mat rmap[2][2];
-			//Precompute maps for cv::remap()
-			initUndistortRectifyMap(in_thermal_camaeraMatrix, in_thermal_distCoeff, tR, tP, t_imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
-			initUndistortRectifyMap(in_color_cameraMatrix, in_color_distCoeff, cR, cP, c_imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
+			//cv::Mat rmap[2][2];
+			////Precompute maps for cv::remap()
+			//initUndistortRectifyMap(in_thermal_camaeraMatrix, in_thermal_distCoeff, tR, tP, t_imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
+			//initUndistortRectifyMap(in_color_cameraMatrix, in_color_distCoeff, cR, cP, c_imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
 
-			cv::Mat canvas;
-			double sf;
-			int w, h;
+			//cv::Mat canvas;
+			//double sf;
+			//int w, h;
 
-			sf = 600. / MAX(c_imageSize.width, c_imageSize.height);
-			w = cvRound(c_imageSize.width*sf);
-			h = cvRound(c_imageSize.height*sf);
-			canvas.create(h, w * 2, CV_8UC3);
-			
-			cv::Mat timg, cimg;
- 			cv::remap(t_frame, timg, rmap[0][0], rmap[0][1], CV_INTER_LINEAR);
-			cvtColor(t_frame, timg, cv::COLOR_GRAY2BGR);
-			cv::remap(c_frame, cimg, rmap[1][0], rmap[1][1], CV_INTER_LINEAR);
+			//sf = 600. / MAX(c_imageSize.width, c_imageSize.height);
+			//w = cvRound(c_imageSize.width*sf);
+			//h = cvRound(c_imageSize.height*sf);
+			//canvas.create(h, w * 2, CV_8UC3);
+
+
+			//
+			//cv::Mat timg, cimg;
+ 		//	cv::remap(t_frame, timg, rmap[0][0], rmap[0][1], CV_INTER_LINEAR);
+			//cvtColor(t_frame, timg, cv::COLOR_GRAY2BGR);
+			//cv::remap(c_frame, cimg, rmap[1][0], rmap[1][1], CV_INTER_LINEAR);
 			//cvtColor(c_frame, cimg, cv::COLOR_GRAY2BGR);
 
-			t_frame = timg.clone();
-			c_frame = cimg.clone();
+			/*cv::Mat canvasPart = canvas(cv::Rect(0, h*k, w, h));
+			resize(cimg, canvasPart, canvasPart.size(), 0, 0, cv::INTER_AREA);
+			cv::Rect vroi(cvRound(tRoi[k].x*sf), cvRound(tRoi[k].y*sf),
+				cvRound(tRoi[k].width*sf), cvRound(tRoi[k].height*sf));
+			rectangle(canvasPart, vroi, cv::Scalar(0, 0, 255), 3, 8);*/
+
+
+			/*t_frame = timg.clone();
+			c_frame = cimg.clone();*/
 				
-			for (int j = 0; j < canvas.rows; j += 16)
-				line(canvas, cv::Point(0, j), cv::Point(canvas.cols, j), cv::Scalar(0, 255, 0), 1, 8);
+			/*for (int j = 0; j < canvas.rows; j += 16)
+				line(canvas, cv::Point(0, j), cv::Point(canvas.cols, j), cv::Scalar(0, 255, 0), 1, 8);*/
 				
 		
 			if (t_frame.empty() == false)
@@ -729,3 +777,5 @@ int main(int argc, char* argv[])
 	system("pause");
 	return -1;
 }
+
+//registerDepth.cpp
