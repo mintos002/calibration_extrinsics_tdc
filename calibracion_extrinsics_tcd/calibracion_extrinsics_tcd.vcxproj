@@ -114,7 +114,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories>..\..\opencv\lib\Release;..\..\Intel RealSense SDK 2.0\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_core345.lib;opencv_highgui345.lib;opencv_calib3d345.lib;opencv_imgproc345.lib;opencv_imgcodecs345.lib;opencv_features2d345.lib;opencv_videoio345.lib;realsense2.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opencv_core345.lib;opencv_highgui345.lib;opencv_calib3d345.lib;opencv_imgproc345.lib;opencv_imgcodecs345.lib;opencv_features2d345.lib;opencv_videoio345.lib;opencv_rgbd345.lib;realsense2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

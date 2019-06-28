@@ -14,6 +14,7 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio/videoio.hpp"
 #include "opencv2/imgcodecs.hpp"
+#include "opencv2/rgbd.hpp"
 
 #include "librealsense2/rs.hpp"
 
@@ -81,11 +82,12 @@ bool get_images_path(std::string path, stringvec& images)
 	return true;
 }
 
-void process_image(int flipMode, int negMode, cv::Mat& t_img, cv::Mat& c_img)
+void process_image(int flipMode, int patternTemp, int patternColor, cv::Mat& t_img, cv::Mat& c_img, cv::Mat& d_img)
 {
 	// Flip
 	cv::Mat t;
 	cv::Mat img;
+	cv::Mat dep;
 	switch (flipMode)
 	{
 	case 1:
@@ -94,56 +96,67 @@ void process_image(int flipMode, int negMode, cv::Mat& t_img, cv::Mat& c_img)
 		break;
 	case 2:
 		cv::flip(c_img, img, 1);
+		cv::flip(d_img, dep, 1);
 		c_img = img.clone();
+		d_img = dep.clone();
 		break;
 	case 3:
 		cv::flip(t_img, t, 1);
 		t_img = t;
 		cv::flip(c_img, img, 1);
 		c_img = img.clone();
+		cv::flip(d_img, dep, 1);
+		d_img = dep.clone();
 		break;
 	}
-	// Negative
-	switch (negMode)
+	// Negative images
+	if (patternTemp == 1)
 	{
-	case 1:
 		cv::bitwise_not(t_img, t_img);
-		break;
-	case 2:
+	}
+	if (patternColor == 0)
+	{
 		cv::bitwise_not(c_img, c_img);
-		break;
-	case 3:
-		cv::bitwise_not(t_img, t_img);
-		cv::bitwise_not(c_img, c_img);
-		break;
 	}
 }
 
-bool get_stereo_images_list(std::string t_path, std::string c_path, stringvec& t_images, stringvec& c_images/*, stringvec& shared_images*/)
+bool get_stereo_images_list(std::string t_path, std::string c_path, std::string d_path, stringvec& t_images, stringvec& c_images, stringvec& d_images/*, stringvec& shared_images*/)
 {
 	// Clear variables
 	t_images.clear();
 	c_images.clear();
+	d_images.clear();
 
 	stringvec t_files;
 	stringvec c_files;
+	stringvec d_files;
 	stringvec nt_files;
 	stringvec nc_files;
+	stringvec nd_files;
 	read_directory(t_path, t_files);
 	read_directory(c_path, c_files);
+	read_directory(d_path, d_files);
+
 	std::string t_im = t_path;
 	std::string c_im = c_path;
+	std::string d_im = d_path;
 	t_im += "\\";
 	c_im += "\\";
+	d_im += "\\";
 
 	if (t_files.size() == 0)
 	{
-		printf("No thermal images found.");
+		printf("No thermal images found.\n");
 		return false;
 	}
-	else if (c_files.size() == 0)
+	if (c_files.size() == 0)
 	{
-		printf("No color images found.");
+		printf("No color images found.\n");
+		return false;
+	}
+	if (d_files.size() == 0)
+	{
+		printf("No depth images found.\n");
 		return false;
 	}
 
@@ -174,27 +187,52 @@ bool get_stereo_images_list(std::string t_path, std::string c_path, stringvec& t
 		}
 	}
 
+	for (int i = 0; i < d_files.size(); i++)
+	{
+		std::size_t found_png = c_files[i].find(".png");
+		std::size_t found_jpg = c_files[i].find(".jpg");
+		if (found_png != std::string::npos || found_jpg != std::string::npos)
+		{
+			std::string p;
+			p = d_files[i].substr(0, d_files[i].size() - 4);
+			p.erase(0, 2);
+			nd_files.push_back(p);
+		}
+	}
+
 	for (int i = 0; i < nt_files.size(); i++)
 	{
 		for (int w = 0; w < nc_files.size(); w++)
 		{
-			if ((t_files[i].compare(".") != 0 && c_files[w].compare(".") != 0)
-				&& (t_files[i].compare("..") != 0 && c_files[w].compare("..") != 0))
+			for (int j = 0; j < nd_files.size(); j++)
 			{
-				if (nt_files[i].compare(nc_files[w]) == 0)
+				if (nt_files[i].compare(nc_files[w]) == 0 && nt_files[i].compare(nd_files[j]) == 0)
 				{
 					std::string tp;
 					std::string cp;
+					std::string dp;
 					tp = t_im;
 					cp = c_im;
+					dp = d_im;
 
-					tp += t_files[i];
-					cp += c_files[w];
+					tp += "t_";
+					tp += nt_files[i];
+					tp += ".png";
+
+					cp += "c_";
+					cp += nc_files[w];
+					cp += ".png";
+
+					dp += "d_";
+					dp += nd_files[j];
+					dp += ".png";
 
 					t_images.push_back(tp);
 					c_images.push_back(cp);
+					d_images.push_back(dp);
 					/*shared_images.push_back(nt_files[i]);*/
 				}
+			
 			}
 		}
 	}
@@ -300,7 +338,7 @@ static bool runStereoCalibration(cv::Size boardSize, float squareSize, cv::Size&
 	objectPoints.resize(imagePoints1.size(), objectPoints[0]);
 
 	//Find intrinsic and extrinsic camera parameters
-	rms = cv::stereoCalibrate(objectPoints, imagePoints1, imagePoints2, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, imageSize, R, T, E, F, CV_CALIB_USE_INTRINSIC_GUESS /*CV_CALIB_FIX_INTRINSIC*/);
+	rms = cv::stereoCalibrate(objectPoints, imagePoints1, imagePoints2, cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, imageSize, R, T, E, F, /*CV_CALIB_USE_INTRINSIC_GUESS*/ CV_CALIB_FIX_INTRINSIC);
 
 	std::cout << "Re-projection error reported by calibrateCamera: " << rms << std::endl;
 
@@ -380,8 +418,15 @@ void pRegistration(const cv::Mat& inputDataC1,
 	const bool depthDilatationC1,
 	cv::Mat& registeredResultC1);
 
-void computeC2MC1(const cv::Mat &R1, const cv::Mat &tvec1, const cv::Mat &R2, const cv::Mat &tvec2,
-	cv::Mat &R_1to2, cv::Mat &tvec_1to2);
+static cv::Scalar randomColor(cv::RNG& rng)
+{
+	int icolor = (unsigned)rng;
+	return cv::Scalar(icolor & 255, (icolor >> 8) & 255, (icolor >> 16) & 255);
+}
+
+
+//void computeC2MC1(const cv::Mat &R1, const cv::Mat &tvec1, const cv::Mat &R2, const cv::Mat &tvec2,
+//	cv::Mat &R_1to2, cv::Mat &tvec_1to2);
 
 // MAIN ---------------------------------------------------------------------------
 int main(int argc, char* argv[])
@@ -391,6 +436,7 @@ int main(int argc, char* argv[])
 	// CONFIG
 	std::string path_thermo = "";
 	std::string path_color = "";
+	std::string path_depth = "";
 	std::string in_data_name;
 	std::string out_data_name;
 	int cd_resolution_mode = 0;
@@ -402,7 +448,13 @@ int main(int argc, char* argv[])
 	float squareSize = 20.0;
 
 	int flip_mode = 0;
-	int negative_mode = 0;
+	int pattern_temp = 0;
+	int pattern_color = 0;
+
+	bool show_overlay = false;
+
+	int count_img = 0;
+	int count_out = 0;
 
 	// READ CONFIG VALUES
 	cv::FileStorage fs(inputSettingsFile, cv::FileStorage::READ); // Read the settings
@@ -415,12 +467,15 @@ int main(int argc, char* argv[])
 
 	fs["PathThermoImages"] >> path_thermo;
 	fs["PathColorImages"] >> path_color;
+	fs["PathDepthImages"] >> path_depth;
 	fs["InputPath"] >> in_data_name;
 	fs["OutputPath"] >> out_data_name;
 	fs["FlipMode"] >> flip_mode;
-	fs["NegativeMode"] >> negative_mode;
+	fs["PatternTemp"] >> pattern_temp;
+	fs["PatternColor"] >> pattern_color;
 	fs["BoardSize_Width"] >> board_width;
 	fs["BoardSize_Height"] >> board_height;
+	fs["ShowOverlay"] >> show_overlay;
 	fs.release();
 
 	// if no path defined, follow output_images folder structure
@@ -433,6 +488,11 @@ int main(int argc, char* argv[])
 	{
 		path_color = exePath();
 		path_color += "\\output_images\\color";
+	}
+	if (path_depth == "")
+	{
+		path_depth = exePath();
+		path_depth += "\\output_images\\depth";
 	}
 	if (in_data_name.empty())
 	{
@@ -477,9 +537,15 @@ int main(int argc, char* argv[])
 		system("pause");
 		return -1;
 	}
-	if (negative_mode < 0 && negative_mode > 1)
+	if (pattern_temp < 0 && pattern_temp > 1)
 	{
-		printf("Invalid flip mode.\n");
+		printf("Invalid pattern mode.\n");
+		system("pause");
+		return -1;
+	}
+	if (pattern_color < 0 && pattern_color > 1)
+	{
+		printf("Invalid pattern color.\n");
 		system("pause");
 		return -1;
 	}
@@ -521,14 +587,18 @@ int main(int argc, char* argv[])
 	// Variables
 	stringvec thermo_images_path;
 	stringvec color_images_path;
+	stringvec depth_images_path;
+	
 
 	// Check if images where found
-	if (!get_stereo_images_list(path_thermo, path_color, thermo_images_path, color_images_path))
+	if (!get_stereo_images_list(path_thermo, path_color, path_depth, thermo_images_path, color_images_path, depth_images_path))
 	{
 		printf("No images found inside the folder.\n");
 		system("pause");
 		return -1;
 	}
+	const int n = thermo_images_path.size();
+	std::vector<bool> circles_detected;
 
 	std::vector<std::vector<cv::Point2f>> t_imagePoints;
 	std::vector<std::vector<cv::Point2f>> c_imagePoints;
@@ -548,6 +618,7 @@ int main(int argc, char* argv[])
 	{
 		cv::Mat t_frame;
 		cv::Mat c_frame;
+		cv::Mat d_frame;
 		if (i < thermo_images_path.size())
 		{
 			t_frame = cv::imread(thermo_images_path[i], cv::IMREAD_ANYDEPTH);
@@ -564,6 +635,16 @@ int main(int argc, char* argv[])
 			if (c_frame.size() != c_imageSize)
 			{
 				printf("The color image grabbed from the folder and the defined thermal image size in the intrinsics file are not equal.\n");
+				system("pause");
+				return -1;
+			}
+		}
+		if (i < depth_images_path.size())
+		{
+			d_frame = cv::imread(depth_images_path[i], cv::IMREAD_ANYDEPTH);
+			if (d_frame.size() != c_imageSize)
+			{
+				printf("The depth image grabbed from the folder and the defined thermal image size in the intrinsics file are not equal.\n");
 				system("pause");
 				return -1;
 			}
@@ -586,25 +667,33 @@ int main(int argc, char* argv[])
 
 		t_imageSize = t_frame.size();
 
+		cv::Mat t_img = t_frame.clone();
+		cv::Mat c_img = c_frame.clone();
+		cv::Mat d_img = d_frame.clone();
+		// convert thermal 16U to 8U
+		t_img.convertTo(t_img, CV_8UC1, 1 / 256.0);
+		// increase contrast color img
+		c_img.convertTo(c_img, -1, 1.75, 0);
+
 		//Image process
-		// Modify images
-		process_image(flip_mode, negative_mode, t_frame, c_frame);
-
-		// convert to 8bit
-		t_frame.convertTo(t_frame, CV_8UC1, 1 / 256.0);
-
-		/*cv::Mat temp1 = t_frame.clone();
-		cv::Mat temp2 = c_frame.clone();
-		t_frame = temp2.clone();
-		c_frame = temp1.clone();*/
+		process_image(flip_mode, 0, 1, t_frame, c_frame, d_frame);
+		process_image(flip_mode, pattern_temp, pattern_color, t_img, c_img, d_img);
 
 		std::vector<cv::Point2f> t_pointBuf;
 		std::vector<cv::Point2f> c_pointBuf;
 		bool t_found;
-		t_found = findCirclesGrid(t_frame, patternsize, t_pointBuf, cv::CALIB_CB_ASYMMETRIC_GRID);
+		t_found = findCirclesGrid(t_img, patternsize, t_pointBuf, cv::CALIB_CB_ASYMMETRIC_GRID);
 		bool c_found;
-		c_found = findCirclesGrid(c_frame, patternsize, c_pointBuf, cv::CALIB_CB_ASYMMETRIC_GRID);
+		c_found = findCirclesGrid(c_img, patternsize, c_pointBuf, cv::CALIB_CB_ASYMMETRIC_GRID);
 
+		if (!t_found || !c_found)
+		{
+			circles_detected.push_back(false);
+		}
+		else
+		{
+			circles_detected.push_back(true);
+		}
 		if (t_found && c_found) // If cercles found in both images
 		{
 			t_imagePoints.push_back(t_pointBuf);
@@ -615,25 +704,40 @@ int main(int argc, char* argv[])
 		if (t_found && !c_found) 
 		{
 			printf("Can't detect %s image circles. Image will be descarted in extrinsics calibration.\n", color_images_path[i].c_str());
+			count_out++;
 		}
 		if (!t_found && c_found)
 		{
 			printf("Can't detect %s image circles. Image will be descarted in extrinsics calibration.\n", thermo_images_path[i].c_str());
+			count_out++;
 		}
 		if (!t_found && !c_found)
 		{
 			printf("Can't detect %s image circles. Image will be descarted in extrinsics calibration.\n", thermo_images_path[i].c_str());
 			printf("Can't detect %s image circles. Image will be descarted in extrinsics calibration.\n", color_images_path[i].c_str());
+			count_out++;
+		}
+
+		if (t_found && c_found)
+		{
+			count_img++;
 		}
 
 		if (t_frame.empty() == false)
 		{
 			cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
+			char txt[50];
+			sprintf(txt, "%d | %d : detected | not detected", count_img, count_out);
+			cv::putText(t_frame, txt, cv::Point(5, 480 - 5), cv::FONT_HERSHEY_DUPLEX, 0.85, 0xffff, 1);
 			cv::imshow("Thermal camera", t_frame);
 		}
 		if (c_frame.empty() == false)
 		{
 			cv::namedWindow("Color camera", cv::WINDOW_AUTOSIZE);
+			char txt[50];
+			//sprintf(txt, "%d Set detected", count_img);
+			sprintf(txt, "%d | %d : detected | not detected", count_img, count_out);
+			cv::putText(c_frame, txt, cv::Point(5, cd_imheight - 5), cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(0, 0, 255), 1);
 			cv::imshow("Color camera", c_frame);
 		}
 		
@@ -646,136 +750,356 @@ int main(int argc, char* argv[])
 	}
 
 	cv::destroyAllWindows();
-	if (calib_done)
+	
+	if (show_overlay)
 	{
-		printf("\nStart Registered image visualization ...\n");
-		printf
-		(
-			"- Press ESC to exit.\n"
-			"- Press any key to visualize the next image.\n"
-		);
-		for (int i = 0; i < thermo_images_path.size(); i++)
+		int subst = 0;
+		if (calib_done)
 		{
-			cv::Mat t_frame;
-			cv::Mat c_frame;
-			
-			t_frame = cv::imread(thermo_images_path[i], cv::IMREAD_ANYDEPTH);
-			c_frame = cv::imread(color_images_path[i], cv::IMREAD_COLOR);
-			
-            process_image(flip_mode, negative_mode, t_frame, c_frame);
-			// convert to 8bit
-			t_frame.convertTo(t_frame, CV_8UC1, 1 / 256.0);
-
-			/*cv::Mat temp1 = t_frame.clone();
-			cv::Mat temp2 = c_frame.clone();
-			t_frame = temp2.clone();
-			c_frame = temp1.clone();*/
-
-			cv::Mat registeredResult;
-			bool dilatationC1 = false;
-
-			cv::Mat tR, cR, tP, cP, Q;
-			cv::Mat rgbdt;
-			double alpha = 0.5;
-			double beta = (1.0 - alpha);
-			cv::Mat cc;
-
-			std::vector<std::vector<cv::Point3f>> objectPoints(1);
-			calcBoardCornerPositions(patternsize, squareSize, objectPoints[0]/*, cv::CALIB_CB_ASYMMETRIC_GRID*/);
-			objectPoints.resize(t_imagePoints.size(), objectPoints[0]);
-
-			cv::Mat rvec_t, tvec_t;
-			cv::solvePnP(objectPoints, t_imagePoints, in_thermal_camaeraMatrix, in_thermal_distCoeff, rvec_t, tvec_t);
-			cv::Mat rvec_c, tvec_c;
-			cv::solvePnP(objectPoints, c_imagePoints, in_color_cameraMatrix, in_color_distCoeff, rvec_c, tvec_c);
-
-			cv::Mat R_t, R_c, T_t, T_c;
-			cv::Rodrigues(rvec_t, R_t);
-			cv::Rodrigues(tvec_t, T_t);
-			cv::Rodrigues(rvec_c, R_c);
-			cv::Rodrigues(tvec_c, T_c);
-
-			cv::Mat normal = (cv::Mat_<double>(3, 1) << 0, 0, 1);
-			cv::Mat normal1 = R_t * normal;
-
-			cv::Mat origin(3, 1, CV_64F, cv::Scalar(0));
-			cv::Mat origin1 = R_t * origin + tvec_t;
-			double d_inv1 = 1.0 / normal1.dot(origin1);
-
-
-
-
-			/*cv::cvtColor(t_frame, cc, CV_GRAY2RGB);
-			cc = c_frame.clone();*/
-			//cv::Rect tRoi, cRoi;
-
-			//cv::stereoRectify(in_thermal_camaeraMatrix, in_thermal_distCoeff, in_color_cameraMatrix, in_color_distCoeff, t_imageSize, R, T, tR, cR, tP, cP, Q, CV_CALIB_ZERO_DISPARITY, -1, c_imageSize, &tRoi, &cRoi);
-			
-			//cv::Mat rmap[2][2];
-			////Precompute maps for cv::remap()
-			//initUndistortRectifyMap(in_thermal_camaeraMatrix, in_thermal_distCoeff, tR, tP, t_imageSize, CV_16SC2, rmap[0][0], rmap[0][1]);
-			//initUndistortRectifyMap(in_color_cameraMatrix, in_color_distCoeff, cR, cP, c_imageSize, CV_16SC2, rmap[1][0], rmap[1][1]);
-
-			//cv::Mat canvas;
-			//double sf;
-			//int w, h;
-
-			//sf = 600. / MAX(c_imageSize.width, c_imageSize.height);
-			//w = cvRound(c_imageSize.width*sf);
-			//h = cvRound(c_imageSize.height*sf);
-			//canvas.create(h, w * 2, CV_8UC3);
-
-
-			//
-			//cv::Mat timg, cimg;
- 		//	cv::remap(t_frame, timg, rmap[0][0], rmap[0][1], CV_INTER_LINEAR);
-			//cvtColor(t_frame, timg, cv::COLOR_GRAY2BGR);
-			//cv::remap(c_frame, cimg, rmap[1][0], rmap[1][1], CV_INTER_LINEAR);
-			//cvtColor(c_frame, cimg, cv::COLOR_GRAY2BGR);
-
-			/*cv::Mat canvasPart = canvas(cv::Rect(0, h*k, w, h));
-			resize(cimg, canvasPart, canvasPart.size(), 0, 0, cv::INTER_AREA);
-			cv::Rect vroi(cvRound(tRoi[k].x*sf), cvRound(tRoi[k].y*sf),
-				cvRound(tRoi[k].width*sf), cvRound(tRoi[k].height*sf));
-			rectangle(canvasPart, vroi, cv::Scalar(0, 0, 255), 3, 8);*/
-
-
-			/*t_frame = timg.clone();
-			c_frame = cimg.clone();*/
-				
-			/*for (int j = 0; j < canvas.rows; j += 16)
-				line(canvas, cv::Point(0, j), cv::Point(canvas.cols, j), cv::Scalar(0, 255, 0), 1, 8);*/
-				
-		
-			if (t_frame.empty() == false)
+			printf("\nStart Registered image visualization ...\n");
+			printf
+			(
+				"- Press ESC to exit.\n"
+				"- Press any key to visualize the next image.\n"
+			);
+			for (int i = 0; i < thermo_images_path.size(); i++)
 			{
-				cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
-				cv::imshow("Thermal camera", t_frame);
+				cv::Mat t_frame, c_frame, d_frame;
+
+				t_frame = cv::imread(thermo_images_path[i], cv::IMREAD_ANYDEPTH);
+				c_frame = cv::imread(color_images_path[i], cv::IMREAD_COLOR);
+				d_frame = cv::imread(depth_images_path[i], cv::IMREAD_ANYDEPTH);
+
+				cv::Mat t_img = t_frame.clone();
+				cv::Mat c_img = c_frame.clone();
+				cv::Mat d_img = d_frame.clone();
+				// convert thermal 16U to 8U
+				t_img.convertTo(t_img, CV_8UC1, 1 / 256.0);
+				// increase contrast color img
+				c_img.convertTo(c_img, -1, 1.75, 0);
+
+				//Image process
+				process_image(flip_mode, 0, 1, t_frame, c_frame, d_frame);
+				process_image(flip_mode, pattern_temp, pattern_color, t_img, c_img, d_img);
+
+				cv::Mat registeredResult;
+				bool dilatationC1 = true;
+				cv::Mat Rt;
+				cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
+				cv::hconcat(R, T, Rt);
+				cv::vconcat(Rt, o, Rt);
+				//cv::rgbd::registerDepth(in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, Rt, d_frame, t_frame.size(), registeredResult, dilatationC1);
+				//pRegistration(d_frame, in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, R, T, t_frame.size(), dilatationC1, registeredResult);
+
+				if (circles_detected[i])
+				{
+					int tot = i + subst;
+					cv::Mat H = cv::findHomography(t_imagePoints[tot], c_imagePoints[tot]);
+					std::cout << "H:\n" << H << std::endl;
+
+					cv::Mat img1_warp;
+					cv::Mat akan;
+					warpPerspective(t_frame, img1_warp, H, c_frame.size());
+					img1_warp.convertTo(img1_warp, CV_8U, 1 / 256.0);
+					cv::cvtColor(img1_warp, img1_warp, CV_GRAY2RGB);
+
+					double alpha = 0.5;
+					double beta = (1.0 - alpha);
+					cv::addWeighted(img1_warp, alpha, c_frame, beta, 0.0, akan);
+					akan.convertTo(akan, -1, 1, 10);
+					akan.convertTo(akan, -1, 2, 0);
+
+					cv::namedWindow("w", cv::WINDOW_AUTOSIZE);
+					cv::imshow("w", akan);
+				}
+				else
+				{
+					subst--;
+				}
+
+				if (t_frame.empty() == false)
+				{
+					cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
+					cv::imshow("Thermal camera", t_frame);
+				}
+				if (c_frame.empty() == false)
+				{
+					cv::namedWindow("Color camera", cv::WINDOW_AUTOSIZE);
+					cv::imshow("Color camera", c_frame);
+				}
+
+				char key = (char)cv::waitKey(0);
+
+				if (key == 27)
+				{
+					break;
+				}
+
 			}
-			if (c_frame.empty() == false)
-			{
-				cv::namedWindow("Color camera", cv::WINDOW_AUTOSIZE);
-				cv::imshow("Color camera", c_frame);
-			}
-			
-
-			/*cv::addWeighted(c_frame, alpha, cc, beta, 0.0, rgbdt);
-
-			cv::namedWindow("Overlay", cv::WINDOW_AUTOSIZE);
-			cv::imshow("Overlay", rgbdt);*/
-
-			char key = (char)cv::waitKey(0);
-
-			if (key == 27)
-			{
-				break;
-			}
-			
 		}
 	}
+	
 	cv::destroyAllWindows();
 	system("pause");
 	return -1;
 }
 
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+	// Our three input types have a different value for a depth pixel with no depth
+template<typename DepthDepth>
+inline DepthDepth
+noDepthSentinelValue()
+{
+	return 0;
+}
+
+template<>
+inline float
+noDepthSentinelValue<float>()
+{
+	return std::numeric_limits<float>::quiet_NaN();
+}
+
+template<>
+inline double
+noDepthSentinelValue<double>()
+{
+	return std::numeric_limits<double>::quiet_NaN();
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+	// Testing for depth pixels with no depth isn't straightforward for NaN values. We
+	// need to specialize the equality check for floats and doubles.
+template<typename DepthDepth>
+inline bool
+isEqualToNoDepthSentinelValue(const DepthDepth &value)
+{
+	return value == noDepthSentinelValue<DepthDepth>();
+}
+
+template<>
+inline bool
+isEqualToNoDepthSentinelValue<float>(const float &value)
+{
+	return cvIsNaN(value) != 0;
+}
+
+template<>
+inline bool
+isEqualToNoDepthSentinelValue<double>(const double &value)
+{
+	return cvIsNaN(value) != 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+   // When using the unsigned short representation, we'd like to round the values to the nearest
+   // integer value. The float/double representations don't need to be rounded
+template<typename DepthDepth>
+inline DepthDepth
+floatToInputDepth(const float &value)
+{
+	return (DepthDepth)value;
+}
+
+template<>
+inline unsigned short
+floatToInputDepth<unsigned short>(const float &value)
+{
+	return (unsigned short)(value + 0.5);
+}
+
+
+
 //registerDepth.cpp
+template<typename DepthDepth> void pRegistration(const cv::Mat_<DepthDepth>& inputDataC1,
+	const cv::Matx33f& cameraMatrixC1,
+	const cv::Matx33f& cameraMatrixC2,
+	const cv::Mat_<float>& distCoeffC2,
+	const cv::Mat& R, const cv::Mat& T,
+	const cv::Size imagePlaneC2,
+	const bool depthDilatationC1,
+	cv::Mat& registeredResultC1)
+{
+	// Rigid-body transform
+	cv::Mat rbtRgb2Depth;
+	cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
+	cv::hconcat(R, T, rbtRgb2Depth);
+	cv::vconcat(rbtRgb2Depth, o, rbtRgb2Depth);
+
+	const float inputDepthToMetersScale = 1.0;
+	// Create output Mat of the correct type, filled with an initial value indicating no depth
+	registeredResultC1 = cv::Mat_<DepthDepth>(imagePlaneC2, noDepthSentinelValue<DepthDepth>());
+
+	// Figure out whether we'll have to apply a distortion
+	bool hasDistortion = (countNonZero(distCoeffC2) > 0);
+
+	// A point (i,j,1) will have to be converted to 3d first, by multiplying it by K.inv()
+	// It will then be transformed by rbtRgb2Depth.
+	// Finally, it will be projected into the external camera via cameraMatrixC2 and
+	// its distortion coefficients. If there is no distortion in the external camera, we
+	// can linearly chain all three operations together.
+
+	cv::Matx44f K = cv::Matx44f::zeros();
+	for (unsigned char j = 0; j < 3; ++j)
+		for (unsigned char i = 0; i < 3; ++i)
+			K(j, i) = cameraMatrixC1(j, i);
+	K(3, 3) = 1;
+
+	cv::Matx44f initialProjection;
+	if (hasDistortion)
+	{
+		// The projection into the external camera will be done separately with distortion
+		initialProjection = rbtRgb2Depth * K.inv();
+	}
+	else
+	{
+		// No distortion, so all operations can be chained
+		initialProjection = cv::Matx44f::zeros();
+		for (unsigned char j = 0; j < 3; ++j)
+			for (unsigned char i = 0; i < 3; ++i)
+				initialProjection(j, i) = cameraMatrixC2(j, i);
+		initialProjection(3, 3) = 1;
+
+		initialProjection = initialProjection * rbtRgb2Depth * K.inv();
+	}
+
+	// Apply the initial projection to the input depth
+	cv::Mat_<cv::Point3f> transformedCloud;
+	{
+		cv::Mat_<cv::Point3f> point_tmp(imagePlaneC2);
+
+		for (int j = 0; j < point_tmp.rows; ++j)
+		{
+			const DepthDepth *inputDataC1Ptr = inputDataC1[j];
+
+			cv::Point3f *point = point_tmp[j];
+			for (int i = 0; i < point_tmp.cols; ++i, ++inputDataC1Ptr, ++point)
+			{
+				float rescaled_depth = float(*inputDataC1Ptr) * inputDepthToMetersScale;
+
+				// If the DepthDepth is of type unsigned short, zero is a sentinel value to indicate
+				// no depth. CV_32F and CV_64F should already have NaN for no depth values.
+				if (rescaled_depth == 0)
+				{
+					rescaled_depth = std::numeric_limits<float>::quiet_NaN();
+				}
+
+				point->x = i * rescaled_depth;
+				point->y = j * rescaled_depth;
+				point->z = rescaled_depth;
+			}
+		}
+
+		perspectiveTransform(point_tmp, transformedCloud, initialProjection);
+	}
+
+	std::vector<cv::Point2f> transformedAndProjectedPoints(transformedCloud.cols);
+	const float metersToInputUnitsScale = 1 / inputDepthToMetersScale;
+	const cv::Rect registeredResultC1Bounds(cv::Point(), imagePlaneC2);
+
+	for (int y = 0; y < transformedCloud.rows; y++)
+	{
+		if (hasDistortion)
+		{
+
+			// Project an entire row of points with distortion.
+			// Doing this for the entire image at once would require more memory.
+			projectPoints(transformedCloud.row(y),
+				cv::Vec3f(0, 0, 0),
+				cv::Vec3f(0, 0, 0),
+				cameraMatrixC2,
+				distCoeffC2,
+				transformedAndProjectedPoints);
+
+		}
+		else
+		{
+
+			// With no distortion, we just have to dehomogenize the point since all major transforms
+			// already happened with initialProjection.
+			cv::Point2f *point2d = &transformedAndProjectedPoints[0];
+			const cv::Point2f *point2d_end = point2d + transformedAndProjectedPoints.size();
+			const cv::Point3f *point3d = transformedCloud[y];
+			for (; point2d < point2d_end; ++point2d, ++point3d)
+			{
+				point2d->x = point3d->x / point3d->z;
+				point2d->y = point3d->y / point3d->z;
+			}
+
+		}
+
+		const cv::Point2f *outputProjectedPoint = &transformedAndProjectedPoints[0];
+		const cv::Point3f *p = transformedCloud[y], *p_end = p + transformedCloud.cols;
+
+
+		for (; p < p_end; ++outputProjectedPoint, ++p)
+		{
+
+
+
+			// Skip this one if there isn't a valid depth
+			const cv::Point2f projectedPixelFloatLocation = *outputProjectedPoint;
+			if (cvIsNaN(projectedPixelFloatLocation.x))
+				continue;
+
+			//Get integer pixel location
+			const cv::Point2i projectedPixelLocation = projectedPixelFloatLocation;
+
+			// Ensure that the projected point is actually contained in our output image
+			if (!registeredResultC1Bounds.contains(projectedPixelLocation))
+				continue;
+
+			// Go back to our original scale, since that's what our output will be
+			// The templated function is to ensure that integer values are rounded to the nearest integer
+			const DepthDepth cloudDepth = floatToInputDepth<DepthDepth>(p->z*metersToInputUnitsScale);
+
+			DepthDepth& outputDepth = registeredResultC1.at<DepthDepth>(projectedPixelLocation.y, projectedPixelLocation.x);
+
+
+			// Occlusion check
+			if (isEqualToNoDepthSentinelValue<DepthDepth>(outputDepth) || (outputDepth > cloudDepth))
+				outputDepth = cloudDepth;
+
+
+			// If desired, dilate this point to avoid holes in the final image
+			if (depthDilatationC1)
+			{
+
+				// Choosing to dilate in a 2x2 region, where the original projected location is in the bottom right of this
+				// region. This is what's done on PrimeSense devices, but a more accurate scheme could be used.
+				const cv::Point2i dilatedProjectedLocations[3] = { cv::Point2i(projectedPixelLocation.x - 1, projectedPixelLocation.y),
+															  cv::Point2i(projectedPixelLocation.x    , projectedPixelLocation.y - 1),
+															  cv::Point2i(projectedPixelLocation.x - 1, projectedPixelLocation.y - 1) };
+
+				for (int i = 0; i < 3; i++) {
+
+					const cv::Point2i& dilatedCoordinates = dilatedProjectedLocations[i];
+
+					if (!registeredResultC1Bounds.contains(dilatedCoordinates))
+						continue;
+
+					DepthDepth& outputDilatedDepth = registeredResultC1.at<DepthDepth>(dilatedCoordinates.y, dilatedCoordinates.x);
+
+					// Occlusion check
+					if (isEqualToNoDepthSentinelValue(outputDilatedDepth) || (outputDilatedDepth > cloudDepth))
+						outputDilatedDepth = cloudDepth;
+
+				}
+
+			} // depthDilatationC1
+
+		} // iterate cols
+	} // iterate rows
+}
