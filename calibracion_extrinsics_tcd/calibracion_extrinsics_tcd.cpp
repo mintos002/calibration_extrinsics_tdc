@@ -18,6 +18,16 @@
 
 #include "librealsense2/rs.hpp"
 
+#include "opencv2/core/matx.hpp"
+
+//#include <list>
+//#include <set>
+//#include <limits>
+//#include "opencv2/core/utility.hpp"
+//#include "opencv2/core/private.hpp"
+//#include "opencv2/core/hal/intrin.hpp"
+//#include "opencv2/core/ocl.hpp"
+
 #pragma warning(disable : 4996)
 
 typedef std::vector<std::string> stringvec;
@@ -239,7 +249,7 @@ bool get_stereo_images_list(std::string t_path, std::string c_path, std::string 
 	return true;
 }
 
-bool readCameraParams(std::string inputSettingsFile, int& thermal_image_width, int& thermal_image_height, int& color_image_width, int& color_image_height,
+bool readCameraParams(std::string inputSettingsFile, int& thermal_image_width, int& thermal_image_height, int& color_image_width, int& color_image_height, float& depth_scale,
 	cv::Mat& thermal_camera_matrix, cv::Mat& thermal_dist_coeff, cv::Mat& color_camera_matrix, cv::Mat& color_dist_coeff)
 {
 	// READ CONFIG VALUES
@@ -254,6 +264,7 @@ bool readCameraParams(std::string inputSettingsFile, int& thermal_image_width, i
 	fs["thermal_image_Height"] >> thermal_image_height;
 	fs["color_image_Width"] >> color_image_width;
 	fs["color_image_Height"] >> color_image_height;
+	fs["depth_scale"] >> depth_scale;
 
 	fs["Thermal_Camera_Matrix"] >> thermal_camera_matrix;
 	fs["Thermal_Distortion_Coefficients"] >> thermal_dist_coeff;
@@ -356,7 +367,7 @@ static bool runStereoCalibration(cv::Size boardSize, float squareSize, cv::Size&
 
 // Print camera parameters to the output file
 static void saveCameraParams(std::string outputFileName, cv::Size& t_imageSize, cv::Mat& t_cameraMatrix, cv::Mat& t_distCoeffs, const std::vector<std::vector<cv::Point2f>>& t_imagePoints,
-	cv::Size& c_imageSize, cv::Mat& c_cameraMatrix, cv::Mat& c_distCoeffs, const std::vector<std::vector<cv::Point2f>>& c_imagePoints, cv::Mat& R, cv::Mat& T, cv::Mat& E, cv::Mat& F, double& rms)
+	cv::Size& c_imageSize, cv::Mat& c_cameraMatrix, cv::Mat& c_distCoeffs, float depth_scale, const std::vector<std::vector<cv::Point2f>>& c_imagePoints, cv::Mat& R, cv::Mat& T, cv::Mat& E, cv::Mat& F, double& rms)
 {
 	cv::FileStorage fs(outputFileName, cv::FileStorage::WRITE);
 
@@ -374,6 +385,7 @@ static void saveCameraParams(std::string outputFileName, cv::Size& t_imageSize, 
 	fs << "thermal_image_Height" << t_imageSize.height;
 	fs << "color_image_Width" << c_imageSize.width;
 	fs << "color_image_Height" << c_imageSize.height;
+	fs << "depth_scale" << depth_scale;
 
 	fs << "Thermal_Camera_Matrix" << t_cameraMatrix;
 	fs << "Thermal_Distortion_Coefficients" << t_distCoeffs;
@@ -391,7 +403,7 @@ static void saveCameraParams(std::string outputFileName, cv::Size& t_imageSize, 
 }
 
 bool runCalibrationAndSave(std::string outputFileName, cv::Size boardSize, float squareSize, cv::Size t_imageSize, cv::Mat&  t_cameraMatrix, cv::Mat& t_distCoeffs, std::vector<std::vector<cv::Point2f>> t_imagePoints, 
-	cv::Size& c_imageSize, cv::Mat& c_cameraMatrix, cv::Mat& c_distCoeffs, std::vector<std::vector<cv::Point2f>> c_imagePoints,
+	cv::Size& c_imageSize, cv::Mat& c_cameraMatrix, cv::Mat& c_distCoeffs, float depth_scale, std::vector<std::vector<cv::Point2f>> c_imagePoints,
 	cv::Mat& R, cv::Mat& T, cv::Mat& E, cv::Mat& F, double& rms)
 {
 	std::vector<cv::Mat> rvecs, tvecs;
@@ -406,16 +418,18 @@ bool runCalibrationAndSave(std::string outputFileName, cv::Size boardSize, float
 
 	if (ok)
 		saveCameraParams(outputFileName, t_imageSize, t_cameraMatrix, t_distCoeffs, t_imagePoints,
-			c_imageSize, c_cameraMatrix, c_distCoeffs, c_imagePoints, R, T, E, F, rms);
+			c_imageSize, c_cameraMatrix, c_distCoeffs, depth_scale, c_imagePoints, R, T, E, F, rms);
 		return ok;
 }
 void pRegistration(const cv::Mat& inputDataC1,
-	const cv::Matx33f& cameraMatrixC1,
-	const cv::Matx33f& cameraMatrixC2,
-	const cv::Mat_<float>& distCoeffC2,
+	const cv::Mat& inputDataC2,
+	const cv::Mat& cameraMatrixC1,
+	const cv::Mat& cameraMatrixC2,
+	const cv::Mat& distCoeffC2,
 	const cv::Mat& R, const cv::Mat& T,
 	const cv::Size imagePlaneC2,
 	const bool depthDilatationC1,
+	const float inputDepthToMetersScale,
 	cv::Mat& registeredResultC1);
 
 static cv::Scalar randomColor(cv::RNG& rng)
@@ -439,10 +453,7 @@ int main(int argc, char* argv[])
 	std::string path_depth = "";
 	std::string in_data_name;
 	std::string out_data_name;
-	int cd_resolution_mode = 0;
-	int cd_imwidth = 1280;
-	int cd_imheight = 720;
-	int cd_fps = 30;
+	
 	int board_width;
 	int board_height;
 	float squareSize = 20.0;
@@ -475,6 +486,7 @@ int main(int argc, char* argv[])
 	fs["PatternColor"] >> pattern_color;
 	fs["BoardSize_Width"] >> board_width;
 	fs["BoardSize_Height"] >> board_height;
+	fs["CircleSize"] >> squareSize;
 	fs["ShowOverlay"] >> show_overlay;
 	fs.release();
 
@@ -506,31 +518,6 @@ int main(int argc, char* argv[])
 		system("pause");
 		return -1;
 	}
-	switch (cd_resolution_mode) // Check resolution
-	{
-	case 0:
-		cd_imwidth = 1280;
-		cd_imheight = 720;
-		break;
-	case 1:
-		cd_imwidth = 640;
-		cd_imheight = 480;
-		break;
-	case 2:
-		cd_imwidth = 848;
-		cd_imheight = 480;
-		break;
-	default:
-		printf("Resolution mode not recogniced. Set the resolution mode in the configuration file.\n");
-		return -1;
-		break;
-	}
-	if (cd_fps < 0) // Check fps
-	{
-		printf("Invalid FPS.\n");
-		system("pause");
-		return -1;
-	}
 	if (flip_mode < 0 && flip_mode > 1) // Check flip mode
 	{
 		printf("Invalid flip mode.\n");
@@ -556,19 +543,26 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 	cv::Size patternsize(board_height, board_width);
+	if (squareSize < 0)
+	{
+		printf("Invalid circle size.\n");
+		system("pause");
+		return -1;
+	}
 
 	// Input file data variables
 	int in_thermal_image_width;
 	int in_thermal_image_height;
 	int in_color_image_width;
 	int in_color_image_height;
+	float depth_scale;
 	cv::Mat in_thermal_camaeraMatrix;
 	cv::Mat in_thermal_distCoeff;
 	cv::Mat in_color_cameraMatrix;
 	cv::Mat in_color_distCoeff;
 
 	// read intrinsics file
-	if (!readCameraParams(in_data_name,in_thermal_image_width, in_thermal_image_height, in_color_image_width, in_color_image_height,
+	if (!readCameraParams(in_data_name,in_thermal_image_width, in_thermal_image_height, in_color_image_width, in_color_image_height, depth_scale,
 		in_thermal_camaeraMatrix, in_thermal_distCoeff, in_color_cameraMatrix, in_color_distCoeff))
 	{
 		printf("Can not read the input data of the intrinsics parameter files.");
@@ -653,9 +647,9 @@ int main(int argc, char* argv[])
 		if (t_frame.empty() || thermo_images_path.size() == i)          // If no more images then run calibration, save and stop loop.
 		{
 			if (t_imagePoints.size() > 0)
-				printf("Starting camera calibration ...\n");
+				printf("Starting camera calibration, this may take a while ...\n");
 			calib_done = runCalibrationAndSave(out_data_name, patternsize, squareSize, t_imageSize, in_thermal_camaeraMatrix, in_thermal_distCoeff, t_imagePoints,
-				c_imageSize, in_color_cameraMatrix, in_color_distCoeff, c_imagePoints, R, T, E, F, rms_error);
+				c_imageSize, in_color_cameraMatrix, in_color_distCoeff, depth_scale, c_imagePoints, R, T, E, F, rms_error);
 			if (!calib_done)
 			{
 				printf("Error while doing extrinsics calibration.\n");
@@ -737,7 +731,7 @@ int main(int argc, char* argv[])
 			char txt[50];
 			//sprintf(txt, "%d Set detected", count_img);
 			sprintf(txt, "%d | %d : detected | not detected", count_img, count_out);
-			cv::putText(c_frame, txt, cv::Point(5, cd_imheight - 5), cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(0, 0, 255), 1);
+			cv::putText(c_frame, txt, cv::Point(5, in_color_image_height - 5), cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(0, 0, 255), 1);
 			cv::imshow("Color camera", c_frame);
 		}
 		
@@ -770,6 +764,25 @@ int main(int argc, char* argv[])
 				c_frame = cv::imread(color_images_path[i], cv::IMREAD_COLOR);
 				d_frame = cv::imread(depth_images_path[i], cv::IMREAD_ANYDEPTH);
 
+				//for (int v = 0; v < in_color_image_width; v++)
+				//{
+				//	for (int u = 0; u < in_color_image_height; u++)
+				//	{
+				//		float X = 0 , Y = 0, Z = 0;
+				//		
+				//		Z = depth_scale * d_frame.at<UINT16>(v, u);
+				//		//std::cout << Z << std::endl;
+
+				//		cv::Mat rbtRgb2Depth;
+				//		cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
+				//		cv::hconcat(R, T, rbtRgb2Depth);
+				//		cv::vconcat(rbtRgb2Depth, o, rbtRgb2Depth);
+
+				//		/*X = ()*/
+				//	}
+				//}
+
+
 				cv::Mat t_img = t_frame.clone();
 				cv::Mat c_img = c_frame.clone();
 				cv::Mat d_img = d_frame.clone();
@@ -786,16 +799,45 @@ int main(int argc, char* argv[])
 				bool dilatationC1 = true;
 				cv::Mat Rt;
 				cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
-				cv::hconcat(R, T, Rt);
+
+				cv::Mat Tm = T.clone();
+
+				Tm.at<double>(0, 0) = T.at<double>(0, 0) * 0.001;
+				Tm.at<double>(1, 0) = T.at<double>(1, 0) * 0.001;
+				Tm.at<double>(2, 0) = T.at<double>(2, 0) * 0.001;
+
+				cv::hconcat(R, Tm, Rt);
 				cv::vconcat(Rt, o, Rt);
-				//cv::rgbd::registerDepth(in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, Rt, d_frame, t_frame.size(), registeredResult, dilatationC1);
-				//pRegistration(d_frame, in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, R, T, t_frame.size(), dilatationC1, registeredResult);
+				
+				cv::rgbd::registerDepth(in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, Rt, d_frame, t_frame.size(), registeredResult, dilatationC1);
+				//pRegistration(d_frame, t_frame, in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, R, T, t_frame.size(), dilatationC1, depth_scale, registeredResult);
+
+				/*cv::Mat x;
+				double min;
+				double max;
+				cv::minMaxIdx(d_frame, &min, &max);
+				cv::Mat adjMap;
+
+				registeredResult.convertTo(adjMap, CV_8UC1, 255 / (max - min), -min);
+				applyColorMap(adjMap, x, cv::COLORMAP_PINK);
+				cv::Mat akn;
+				t_frame.convertTo(akn, CV_8U, 1 / 256.0);
+				cv::cvtColor(akn, akn, CV_GRAY2RGB);
+
+				cv::Mat akan;
+				double alpha = 0.5;
+				double beta = (1.0 - alpha);
+				cv::addWeighted(x, alpha, akn, beta, 0.0, akan);
+
+				cv::namedWindow("x", cv::WINDOW_AUTOSIZE);
+
+				cv::imshow("x", akan);*/
 
 				if (circles_detected[i])
 				{
 					int tot = i + subst;
 					cv::Mat H = cv::findHomography(t_imagePoints[tot], c_imagePoints[tot]);
-					std::cout << "H:\n" << H << std::endl;
+					//std::cout << "H:\n" << H << std::endl;
 
 					cv::Mat img1_warp;
 					cv::Mat akan;
@@ -809,8 +851,8 @@ int main(int argc, char* argv[])
 					akan.convertTo(akan, -1, 1, 10);
 					akan.convertTo(akan, -1, 2, 0);
 
-					cv::namedWindow("w", cv::WINDOW_AUTOSIZE);
-					cv::imshow("w", akan);
+					cv::namedWindow("Color - thermal camera", cv::WINDOW_AUTOSIZE);
+					cv::imshow("Color - thermal camera", akan);
 				}
 				else
 				{
@@ -819,13 +861,29 @@ int main(int argc, char* argv[])
 
 				if (t_frame.empty() == false)
 				{
-					cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
-					cv::imshow("Thermal camera", t_frame);
+					/*cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
+					cv::imshow("Thermal camera", t_frame);*/
 				}
 				if (c_frame.empty() == false)
 				{
-					cv::namedWindow("Color camera", cv::WINDOW_AUTOSIZE);
-					cv::imshow("Color camera", c_frame);
+					/*cv::Mat img1;
+					cv::Mat akan;
+					double min;
+					double max;
+					cv::minMaxIdx(d_frame, &min, &max);
+					cv::Mat adjMap;
+
+					d_frame.convertTo(adjMap, CV_8UC1, 255 / (max - min), -min);
+					applyColorMap(adjMap, img1, cv::COLORMAP_JET);
+
+					double alpha = 0.9;
+					double beta = (1.0 - alpha);
+					cv::addWeighted(img1, alpha, c_frame, beta, 0.0, akan);
+					akan.convertTo(akan, -1, 1, 10);
+					akan.convertTo(akan, -1, 2, 0);
+
+					cv::namedWindow("Color - depth camera", cv::WINDOW_AUTOSIZE);
+					cv::imshow("Color - depth camera", akan);*/
 				}
 
 				char key = (char)cv::waitKey(0);
@@ -920,27 +978,34 @@ floatToInputDepth<unsigned short>(const float &value)
 	return (unsigned short)(value + 0.5);
 }
 
-
-
 //registerDepth.cpp
-template<typename DepthDepth> void pRegistration(const cv::Mat_<DepthDepth>& inputDataC1,
-	const cv::Matx33f& cameraMatrixC1,
-	const cv::Matx33f& cameraMatrixC2,
-	const cv::Mat_<float>& distCoeffC2,
+void pRegistration(const cv::Mat& inputDataC1,
+	const cv::Mat& inputDataC2,
+	const cv::Mat& cameraMatrixC1,
+	const cv::Mat& cameraMatrixC2,
+	const cv::Mat& distCoeffC2,
 	const cv::Mat& R, const cv::Mat& T,
 	const cv::Size imagePlaneC2,
 	const bool depthDilatationC1,
+	const float inputDepthToMetersScale,
 	cv::Mat& registeredResultC1)
 {
-	// Rigid-body transform
-	cv::Mat rbtRgb2Depth;
-	cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
-	cv::hconcat(R, T, rbtRgb2Depth);
-	cv::vconcat(rbtRgb2Depth, o, rbtRgb2Depth);
+	cv::Mat l = (cv::Mat_<float>(1, 4) << 0, 0, 0, 1);
+	cv::Mat s = (cv::Mat_<float>(3, 1) << 0, 0, 0);
 
-	const float inputDepthToMetersScale = 1.0;
+	// Rigid-body transform
+	cv::Mat_<float> rbtRgb2Depth;
+	cv::Mat_<float> Tm = T.clone();
+
+	Tm.at<float>(0, 0) = T.at<float>(0, 0) * 0.001;
+	Tm.at<float>(1, 0) = T.at<float>(1, 0) * 0.001;
+	Tm.at<float>(2, 0) = T.at<float>(2, 0) * 0.001;
+
+	cv::hconcat(R, Tm, rbtRgb2Depth);
+	cv::vconcat(rbtRgb2Depth, l, rbtRgb2Depth);
+
 	// Create output Mat of the correct type, filled with an initial value indicating no depth
-	registeredResultC1 = cv::Mat_<DepthDepth>(imagePlaneC2, noDepthSentinelValue<DepthDepth>());
+	registeredResultC1 = inputDataC2.clone();
 
 	// Figure out whether we'll have to apply a distortion
 	bool hasDistortion = (countNonZero(distCoeffC2) > 0);
@@ -950,14 +1015,11 @@ template<typename DepthDepth> void pRegistration(const cv::Mat_<DepthDepth>& inp
 	// Finally, it will be projected into the external camera via cameraMatrixC2 and
 	// its distortion coefficients. If there is no distortion in the external camera, we
 	// can linearly chain all three operations together.
+	cv::Mat K = cameraMatrixC1.clone();
+	cv::hconcat(K, s, K);
+	cv::vconcat(K, l, K);
 
-	cv::Matx44f K = cv::Matx44f::zeros();
-	for (unsigned char j = 0; j < 3; ++j)
-		for (unsigned char i = 0; i < 3; ++i)
-			K(j, i) = cameraMatrixC1(j, i);
-	K(3, 3) = 1;
-
-	cv::Matx44f initialProjection;
+	cv::Mat initialProjection;
 	if (hasDistortion)
 	{
 		// The projection into the external camera will be done separately with distortion
@@ -966,11 +1028,11 @@ template<typename DepthDepth> void pRegistration(const cv::Mat_<DepthDepth>& inp
 	else
 	{
 		// No distortion, so all operations can be chained
-		initialProjection = cv::Matx44f::zeros();
+		initialProjection = cv::Mat(cv::Size(4, 4), CV_32FC1, cv::Scalar(0));
 		for (unsigned char j = 0; j < 3; ++j)
 			for (unsigned char i = 0; i < 3; ++i)
-				initialProjection(j, i) = cameraMatrixC2(j, i);
-		initialProjection(3, 3) = 1;
+				initialProjection.at<uchar>(j, i) = cameraMatrixC2.at<uchar>(j, i);
+		initialProjection.at<uchar>(3, 3) = 1;
 
 		initialProjection = initialProjection * rbtRgb2Depth * K.inv();
 	}
@@ -982,124 +1044,377 @@ template<typename DepthDepth> void pRegistration(const cv::Mat_<DepthDepth>& inp
 
 		for (int j = 0; j < point_tmp.rows; ++j)
 		{
-			const DepthDepth *inputDataC1Ptr = inputDataC1[j];
+			const float *inputDataC1Ptr = inputDataC1.ptr<float>(j);
 
 			cv::Point3f *point = point_tmp[j];
 			for (int i = 0; i < point_tmp.cols; ++i, ++inputDataC1Ptr, ++point)
 			{
 				float rescaled_depth = float(*inputDataC1Ptr) * inputDepthToMetersScale;
-
-				// If the DepthDepth is of type unsigned short, zero is a sentinel value to indicate
-				// no depth. CV_32F and CV_64F should already have NaN for no depth values.
+				
 				if (rescaled_depth == 0)
 				{
 					rescaled_depth = std::numeric_limits<float>::quiet_NaN();
 				}
 
-				point->x = i * rescaled_depth;
-				point->y = j * rescaled_depth;
+				point->x = (i - K.at<float>(0,2)) * rescaled_depth / K.at<float>(0, 0);
+				point->y = (j - K.at<float>(1,2)) * rescaled_depth / K.at<float>(1, 1);
 				point->z = rescaled_depth;
+
 			}
 		}
 
 		perspectiveTransform(point_tmp, transformedCloud, initialProjection);
 	}
 
-	std::vector<cv::Point2f> transformedAndProjectedPoints(transformedCloud.cols);
-	const float metersToInputUnitsScale = 1 / inputDepthToMetersScale;
-	const cv::Rect registeredResultC1Bounds(cv::Point(), imagePlaneC2);
-
-	for (int y = 0; y < transformedCloud.rows; y++)
-	{
-		if (hasDistortion)
-		{
-
-			// Project an entire row of points with distortion.
-			// Doing this for the entire image at once would require more memory.
-			projectPoints(transformedCloud.row(y),
-				cv::Vec3f(0, 0, 0),
-				cv::Vec3f(0, 0, 0),
-				cameraMatrixC2,
-				distCoeffC2,
-				transformedAndProjectedPoints);
-
-		}
-		else
-		{
-
-			// With no distortion, we just have to dehomogenize the point since all major transforms
-			// already happened with initialProjection.
-			cv::Point2f *point2d = &transformedAndProjectedPoints[0];
-			const cv::Point2f *point2d_end = point2d + transformedAndProjectedPoints.size();
-			const cv::Point3f *point3d = transformedCloud[y];
-			for (; point2d < point2d_end; ++point2d, ++point3d)
-			{
-				point2d->x = point3d->x / point3d->z;
-				point2d->y = point3d->y / point3d->z;
-			}
-
-		}
-
-		const cv::Point2f *outputProjectedPoint = &transformedAndProjectedPoints[0];
-		const cv::Point3f *p = transformedCloud[y], *p_end = p + transformedCloud.cols;
-
-
-		for (; p < p_end; ++outputProjectedPoint, ++p)
-		{
 
 
 
-			// Skip this one if there isn't a valid depth
-			const cv::Point2f projectedPixelFloatLocation = *outputProjectedPoint;
-			if (cvIsNaN(projectedPixelFloatLocation.x))
-				continue;
-
-			//Get integer pixel location
-			const cv::Point2i projectedPixelLocation = projectedPixelFloatLocation;
-
-			// Ensure that the projected point is actually contained in our output image
-			if (!registeredResultC1Bounds.contains(projectedPixelLocation))
-				continue;
-
-			// Go back to our original scale, since that's what our output will be
-			// The templated function is to ensure that integer values are rounded to the nearest integer
-			const DepthDepth cloudDepth = floatToInputDepth<DepthDepth>(p->z*metersToInputUnitsScale);
-
-			DepthDepth& outputDepth = registeredResultC1.at<DepthDepth>(projectedPixelLocation.y, projectedPixelLocation.x);
 
 
-			// Occlusion check
-			if (isEqualToNoDepthSentinelValue<DepthDepth>(outputDepth) || (outputDepth > cloudDepth))
-				outputDepth = cloudDepth;
 
 
-			// If desired, dilate this point to avoid holes in the final image
-			if (depthDilatationC1)
-			{
 
-				// Choosing to dilate in a 2x2 region, where the original projected location is in the bottom right of this
-				// region. This is what's done on PrimeSense devices, but a more accurate scheme could be used.
-				const cv::Point2i dilatedProjectedLocations[3] = { cv::Point2i(projectedPixelLocation.x - 1, projectedPixelLocation.y),
-															  cv::Point2i(projectedPixelLocation.x    , projectedPixelLocation.y - 1),
-															  cv::Point2i(projectedPixelLocation.x - 1, projectedPixelLocation.y - 1) };
 
-				for (int i = 0; i < 3; i++) {
 
-					const cv::Point2i& dilatedCoordinates = dilatedProjectedLocations[i];
 
-					if (!registeredResultC1Bounds.contains(dilatedCoordinates))
-						continue;
 
-					DepthDepth& outputDilatedDepth = registeredResultC1.at<DepthDepth>(dilatedCoordinates.y, dilatedCoordinates.x);
-
-					// Occlusion check
-					if (isEqualToNoDepthSentinelValue(outputDilatedDepth) || (outputDilatedDepth > cloudDepth))
-						outputDilatedDepth = cloudDepth;
-
-				}
-
-			} // depthDilatationC1
-
-		} // iterate cols
-	} // iterate rows
 }
+
+//
+////registerDepth.cpp
+//void pRegistration(const cv::Mat& inputDataC1,
+//	const cv::Mat& inputDataC2,
+//	const cv::Mat& cameraMatrixC1,
+//	const cv::Mat& cameraMatrixC2,
+//	const cv::Mat& distCoeffC2,
+//	const cv::Mat& R, const cv::Mat& T,
+//	const cv::Size imagePlaneC2,
+//	const bool depthDilatationC1,
+//	const float inputDepthToMetersScale,
+//	cv::Mat& registeredResultC1)
+//{
+//	cv::Mat l = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
+//	cv::Mat s = (cv::Mat_<double>(3, 1) << 0, 0, 0);
+//
+//	// Rigid-body transform
+//	cv::Mat rbtRgb2Depth;
+//	cv::Mat Tm = T.clone();
+//
+//	Tm.at<double>(0, 0) = T.at<double>(0, 0) * 0.001;
+//	Tm.at<double>(1, 0) = T.at<double>(1, 0) * 0.001;
+//	Tm.at<double>(2, 0) = T.at<double>(2, 0) * 0.001;
+//
+//	cv::hconcat(R, Tm, rbtRgb2Depth);
+//	cv::vconcat(rbtRgb2Depth, l, rbtRgb2Depth);
+//
+//	
+//	// Create output Mat of the correct type, filled with an initial value indicating no depth
+//	registeredResultC1 = inputDataC2.clone();
+//
+//	// Figure out whether we'll have to apply a distortion
+//	bool hasDistortion = (countNonZero(distCoeffC2) > 0);
+//
+//	// A point (i,j,1) will have to be converted to 3d first, by multiplying it by K.inv()
+//	// It will then be transformed by rbtRgb2Depth.
+//	// Finally, it will be projected into the external camera via cameraMatrixC2 and
+//	// its distortion coefficients. If there is no distortion in the external camera, we
+//	// can linearly chain all three operations together.
+//	cv::Mat K = cameraMatrixC1.clone();
+//	cv::hconcat(K, s, K);
+//	cv::vconcat(K, l, K);
+//
+//	cv::Mat initialProjection;
+//	if (hasDistortion)
+//	{
+//		// The projection into the external camera will be done separately with distortion
+//		initialProjection = rbtRgb2Depth * K.inv();
+//	}
+//	else
+//	{
+//		// No distortion, so all operations can be chained
+//		initialProjection = cv::Mat(cv::Size(4, 4), CV_32FC1, cv::Scalar(0));
+//		for (unsigned char j = 0; j < 3; ++j)
+//			for (unsigned char i = 0; i < 3; ++i)
+//				initialProjection.at<uchar>(j, i) = cameraMatrixC2.at<uchar>(j, i);
+//		initialProjection.at<uchar>(3, 3) = 1;
+//
+//		initialProjection = initialProjection * rbtRgb2Depth * K.inv();
+//	}
+//
+//	// Apply the initial projection to the input depth
+//	cv::Mat_<cv::Point3f> transformedCloud;
+//	{
+//		cv::Mat_<cv::Point3f> point_tmp(imagePlaneC2);
+//
+//		for (int j = 0; j < point_tmp.rows; ++j)
+//		{
+//			const float *inputDataC1Ptr = inputDataC1.ptr<float>(j);
+//
+//			cv::Point3f *point = point_tmp[j];
+//			for (int i = 0; i < point_tmp.cols; ++i, ++inputDataC1Ptr, ++point)
+//			{
+//				float rescaled_depth = float(*inputDataC1Ptr) * inputDepthToMetersScale;
+//				
+//				if (rescaled_depth == 0)
+//				{
+//					rescaled_depth = std::numeric_limits<float>::quiet_NaN();
+//				}
+//
+//				//point->x = (i - K.at<float>(0,2)) * rescaled_depth / K.at<float>(0, 0);
+//				//point->y = (j - K.at<float>(1,2)) * rescaled_depth / K.at<float>(1, 1);
+//				//point->z = rescaled_depth;
+//
+//				point->x = i * rescaled_depth;
+//				point->y = j * rescaled_depth;
+//				point->z = rescaled_depth;
+//			}
+//		}
+//
+//		perspectiveTransform(point_tmp, transformedCloud, initialProjection);
+//	}
+//
+//	std::vector<cv::Point2f> transformedAndProjectedPoints(transformedCloud.cols);
+//	const float metersToInputUnitsScale = 1 / inputDepthToMetersScale;
+//	const cv::Rect registeredDepthBounds(cv::Point(), imagePlaneC2);
+//	int ct = 0;
+//	for (int y = 0; y < transformedCloud.rows; y++)
+//	{
+//		if (hasDistortion)
+//		{
+//
+//			// Project an entire row of points with distortion.
+//			// Doing this for the entire image at once would require more memory.
+//			projectPoints(transformedCloud.row(y),
+//				cv::Vec3f(0, 0, 0),
+//				cv::Vec3f(0, 0, 0),
+//				cameraMatrixC2,
+//				distCoeffC2,
+//				transformedAndProjectedPoints);
+//
+//		}
+//		else
+//		{
+//
+//			// With no distortion, we just have to dehomogenize the point since all major transforms
+//			// already happened with initialProjection.
+//			cv::Point2f *point2d = &transformedAndProjectedPoints[0];
+//			const cv::Point2f *point2d_end = point2d + transformedAndProjectedPoints.size();
+//			const cv::Point3f *point3d = transformedCloud[y];
+//			for (; point2d < point2d_end; ++point2d, ++point3d)
+//			{
+//				point2d->x = point3d->x / point3d->z;
+//				point2d->y = point3d->y / point3d->z;
+//			}
+//
+//		}
+//
+//		const cv::Point2f *outputProjectedPoint = &transformedAndProjectedPoints[0];
+//		const cv::Point3f *p = transformedCloud[y], *p_end = p + transformedCloud.cols;
+//
+//		
+//		for (; p < p_end; ++outputProjectedPoint, ++p)
+//		{
+//			// Skip this one if there isn't a valid depth
+//			const cv::Point2f projectedPixelFloatLocation = *outputProjectedPoint;
+//			if (cvIsNaN(projectedPixelFloatLocation.x))
+//				continue;
+//			
+//			//Get integer pixel location
+//			const cv::Point2i projectedPixelLocation = projectedPixelFloatLocation;
+//
+//			// Ensure that the projected point is actually contained in our output image
+//			if (!registeredDepthBounds.contains(projectedPixelLocation))
+//				continue;
+//
+//			cv::Mat cloudDepth;
+//
+//		} // iterate cols
+//	} // iterate rows
+//}
+
+
+
+
+
+
+////registerDepth.cpp
+//template<typename DepthDepth> void pRegistration(const cv::Mat_<DepthDepth>& inputDataC1,
+//	const cv::Mat& inputDataC2,
+//	const cv::Matx33f& cameraMatrixC1,
+//	const cv::Matx33f& cameraMatrixC2,
+//	const cv::Mat_<float>& distCoeffC2,
+//	const cv::Mat& R, const cv::Mat& T,
+//	const cv::Size imagePlaneC2,
+//	const bool depthDilatationC1,
+//	const float inputDepthToMetersScale,
+//	cv::Mat& registeredResultC1)
+//{
+//	// Rigid-body transform
+//	cv::Mat rbtRgb2Depth;
+//	cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
+//	cv::hconcat(R, T, rbtRgb2Depth);
+//	cv::vconcat(rbtRgb2Depth, o, rbtRgb2Depth);
+//
+//	
+//	// Create output Mat of the correct type, filled with an initial value indicating no depth
+//	registeredResultC1 = cv::Mat_<DepthDepth>(imagePlaneC2, noDepthSentinelValue<DepthDepth>());
+//
+//	// Figure out whether we'll have to apply a distortion
+//	bool hasDistortion = (countNonZero(distCoeffC2) > 0);
+//
+//	// A point (i,j,1) will have to be converted to 3d first, by multiplying it by K.inv()
+//	// It will then be transformed by rbtRgb2Depth.
+//	// Finally, it will be projected into the external camera via cameraMatrixC2 and
+//	// its distortion coefficients. If there is no distortion in the external camera, we
+//	// can linearly chain all three operations together.
+//
+//	cv::Matx44f K = cv::Matx44f::zeros();
+//	for (unsigned char j = 0; j < 3; ++j)
+//		for (unsigned char i = 0; i < 3; ++i)
+//			K(j, i) = cameraMatrixC1(j, i);
+//	K(3, 3) = 1;
+//
+//	cv::Matx44f initialProjection;
+//	if (hasDistortion)
+//	{
+//		// The projection into the external camera will be done separately with distortion
+//		initialProjection = rbtRgb2Depth * K.inv();
+//	}
+//	else
+//	{
+//		// No distortion, so all operations can be chained
+//		initialProjection = cv::Matx44f::zeros();
+//		for (unsigned char j = 0; j < 3; ++j)
+//			for (unsigned char i = 0; i < 3; ++i)
+//				initialProjection(j, i) = cameraMatrixC2(j, i);
+//		initialProjection(3, 3) = 1;
+//
+//		initialProjection = initialProjection * rbtRgb2Depth * K.inv();
+//	}
+//
+//	// Apply the initial projection to the input depth
+//	cv::Mat_<cv::Point3f> transformedCloud;
+//	{
+//		cv::Mat_<cv::Point3f> point_tmp(imagePlaneC2);
+//
+//		for (int j = 0; j < point_tmp.rows; ++j)
+//		{
+//			const DepthDepth *inputDataC1Ptr = inputDataC1[j];
+//
+//			cv::Point3f *point = point_tmp[j];
+//			for (int i = 0; i < point_tmp.cols; ++i, ++inputDataC1Ptr, ++point)
+//			{
+//				float rescaled_depth = float(*inputDataC1Ptr) * inputDepthToMetersScale;
+//
+//				// If the DepthDepth is of type unsigned short, zero is a sentinel value to indicate
+//				// no depth. CV_32F and CV_64F should already have NaN for no depth values.
+//				if (rescaled_depth == 0)
+//				{
+//					rescaled_depth = std::numeric_limits<float>::quiet_NaN();
+//				}
+//
+//				point->x = i * rescaled_depth;
+//				point->y = j * rescaled_depth;
+//				point->z = rescaled_depth;
+//			}
+//		}
+//
+//		perspectiveTransform(point_tmp, transformedCloud, initialProjection);
+//	}
+//
+//	std::vector<cv::Point2f> transformedAndProjectedPoints(transformedCloud.cols);
+//	const float metersToInputUnitsScale = 1 / inputDepthToMetersScale;
+//	const cv::Rect registeredResultC1Bounds(cv::Point(), imagePlaneC2);
+//
+//	for (int y = 0; y < transformedCloud.rows; y++)
+//	{
+//		if (hasDistortion)
+//		{
+//
+//			// Project an entire row of points with distortion.
+//			// Doing this for the entire image at once would require more memory.
+//			projectPoints(transformedCloud.row(y),
+//				cv::Vec3f(0, 0, 0),
+//				cv::Vec3f(0, 0, 0),
+//				cameraMatrixC2,
+//				distCoeffC2,
+//				transformedAndProjectedPoints);
+//
+//		}
+//		else
+//		{
+//
+//			// With no distortion, we just have to dehomogenize the point since all major transforms
+//			// already happened with initialProjection.
+//			cv::Point2f *point2d = &transformedAndProjectedPoints[0];
+//			const cv::Point2f *point2d_end = point2d + transformedAndProjectedPoints.size();
+//			const cv::Point3f *point3d = transformedCloud[y];
+//			for (; point2d < point2d_end; ++point2d, ++point3d)
+//			{
+//				point2d->x = point3d->x / point3d->z;
+//				point2d->y = point3d->y / point3d->z;
+//			}
+//
+//		}
+//
+//		const cv::Point2f *outputProjectedPoint = &transformedAndProjectedPoints[0];
+//		const cv::Point3f *p = transformedCloud[y], *p_end = p + transformedCloud.cols;
+//
+//
+//		for (; p < p_end; ++outputProjectedPoint, ++p)
+//		{
+//
+//			// Skip this one if there isn't a valid depth
+//			const cv::Point2f projectedPixelFloatLocation = *outputProjectedPoint;
+//			if (cvIsNaN(projectedPixelFloatLocation.x))
+//				continue;
+//
+//			//Get integer pixel location
+//			const cv::Point2i projectedPixelLocation = projectedPixelFloatLocation;
+//
+//			// Ensure that the projected point is actually contained in our output image
+//			if (!registeredResultC1Bounds.contains(projectedPixelLocation))
+//				continue;
+//
+//			// Go back to our original scale, since that's what our output will be
+//			// The templated function is to ensure that integer values are rounded to the nearest integer
+//			const DepthDepth cloudDepth = floatToInputDepth<DepthDepth>(p->z*metersToInputUnitsScale);
+//
+//			DepthDepth& outputDepth = registeredResultC1.at<DepthDepth>(projectedPixelLocation.y, projectedPixelLocation.x);
+//
+//
+//			// Occlusion check
+//			if (isEqualToNoDepthSentinelValue<DepthDepth>(outputDepth) || (outputDepth > cloudDepth))
+//				outputDepth = cloudDepth;
+//
+//
+//			// If desired, dilate this point to avoid holes in the final image
+//			if (depthDilatationC1)
+//			{
+//
+//				// Choosing to dilate in a 2x2 region, where the original projected location is in the bottom right of this
+//				// region. This is what's done on PrimeSense devices, but a more accurate scheme could be used.
+//				const cv::Point2i dilatedProjectedLocations[3] = { cv::Point2i(projectedPixelLocation.x - 1, projectedPixelLocation.y),
+//															  cv::Point2i(projectedPixelLocation.x    , projectedPixelLocation.y - 1),
+//															  cv::Point2i(projectedPixelLocation.x - 1, projectedPixelLocation.y - 1) };
+//
+//				for (int i = 0; i < 3; i++) {
+//
+//					const cv::Point2i& dilatedCoordinates = dilatedProjectedLocations[i];
+//
+//					if (!registeredResultC1Bounds.contains(dilatedCoordinates))
+//						continue;
+//
+//					DepthDepth& outputDilatedDepth = registeredResultC1.at<DepthDepth>(dilatedCoordinates.y, dilatedCoordinates.x);
+//
+//					// Occlusion check
+//					if (isEqualToNoDepthSentinelValue(outputDilatedDepth) || (outputDilatedDepth > cloudDepth))
+//						outputDilatedDepth = cloudDepth;
+//
+//				}
+//
+//			} // depthDilatationC1
+//
+//		} // iterate cols
+//	} // iterate rows
+//}

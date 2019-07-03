@@ -12,13 +12,13 @@
                       |     |-> t_20196141560502490749.png
                       |     |-> ...                       
             set the images path surrounded by "". For example: "C:\dir\thermo" -->
-  <PathThermoImages>"C:\Users\aljuasin\Desktop\captura_tcd\captura_tcd\x64\Release\output_imagesx1280\thermo"</PathThermoImages>
-  <PathColorImages>"C:\Users\aljuasin\Desktop\captura_tcd\captura_tcd\x64\Release\output_imagesx1280\color"</PathColorImages>
-  <PathDepthImages>"C:\Users\aljuasin\Desktop\captura_tcd\captura_tcd\x64\Release\output_imagesx1280\depth"</PathDepthImages>
+  <PathThermoImages>"C:\Users\aljuasin\Desktop\captura_tcd\imagenes\output_imagesx640_80\thermo"</PathThermoImages>
+  <PathColorImages>"C:\Users\aljuasin\Desktop\captura_tcd\imagenes\output_imagesx640_80\color"</PathColorImages>
+  <PathDepthImages>"C:\Users\aljuasin\Desktop\captura_tcd\imagenes\output_imagesx640_80\depth"</PathDepthImages>
   <!-- Path to the .xml file of calibration parameters (the output of calibration_tcd app) -->
-  <InputPath>"out_camera_intrinsics_1280.xml"</InputPath>
+  <InputPath>"C:\Users\aljuasin\Desktop\captura_tcd\imagenes\output_imagesx640_80\out_camera_intrinsics_640_80.xml"</InputPath>
   <!-- Path to the .xml output file that this app will generate -->
-  <OutputPath>"out_camera_data_extrinsics_1280.xml"</OutputPath>
+  <OutputPath>"C:\Users\aljuasin\Desktop\captura_tcd\imagenes\output_imagesx640_80\out_camera_extrinsics_640_80.xml"</OutputPath>
 
   <!-- Flip images
         - 0 no flip (Default)
@@ -34,14 +34,12 @@
         - 0 Black board with white circles (default)
         - 1 White board with black circles -->
   <PatternColor>0</PatternColor>
-
-  <!-- Detect the asymmetric circle pattern, the pattern must appear with white background and black cercles 
-        - 0 Do not detect the pattern (default)
-        - 1 Detect the pattern-->
-  <AsymCirlePaternDetector>1</AsymCirlePaternDetector>
+  
   <!-- Number of inner corners per a item row and column. (square, circle) -->
   <BoardSize_Width>9</BoardSize_Width>
   <BoardSize_Height>3</BoardSize_Height>
+  <!-- Speciry the diameter of the circles (mm) -->
+  <CircleSize>20.0</CircleSize>
 
   <!-- Show the overlay of the thermal and color images 
         - 0 do not show (default)
