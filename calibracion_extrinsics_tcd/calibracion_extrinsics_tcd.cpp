@@ -421,6 +421,7 @@ bool runCalibrationAndSave(std::string outputFileName, cv::Size boardSize, float
 			c_imageSize, c_cameraMatrix, c_distCoeffs, depth_scale, c_imagePoints, R, T, E, F, rms);
 		return ok;
 }
+
 void pRegistration(const cv::Mat& inputDataC1,
 	const cv::Mat& inputDataC2,
 	const cv::Mat& cameraMatrixC1,
@@ -721,7 +722,7 @@ int main(int argc, char* argv[])
 		{
 			cv::namedWindow("Thermal camera", cv::WINDOW_AUTOSIZE);
 			char txt[50];
-			sprintf(txt, "%d | %d : detected | not detected", count_img, count_out);
+			sprintf(txt, "%d detected | %d not detected", count_img, count_out);
 			cv::putText(t_frame, txt, cv::Point(5, 480 - 5), cv::FONT_HERSHEY_DUPLEX, 0.85, 0xffff, 1);
 			cv::imshow("Thermal camera", t_frame);
 		}
@@ -730,7 +731,7 @@ int main(int argc, char* argv[])
 			cv::namedWindow("Color camera", cv::WINDOW_AUTOSIZE);
 			char txt[50];
 			//sprintf(txt, "%d Set detected", count_img);
-			sprintf(txt, "%d | %d : detected | not detected", count_img, count_out);
+			sprintf(txt, "%d detected | %d not detected", count_img, count_out);
 			cv::putText(c_frame, txt, cv::Point(5, in_color_image_height - 5), cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(0, 0, 255), 1);
 			cv::imshow("Color camera", c_frame);
 		}
@@ -796,7 +797,7 @@ int main(int argc, char* argv[])
 				process_image(flip_mode, pattern_temp, pattern_color, t_img, c_img, d_img);
 
 				cv::Mat registeredResult;
-				bool dilatationC1 = true;
+				bool dilatationC1 = false;
 				cv::Mat Rt;
 				cv::Mat o = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
 
@@ -808,10 +809,11 @@ int main(int argc, char* argv[])
 
 				cv::hconcat(R, Tm, Rt);
 				cv::vconcat(Rt, o, Rt);
-				
-				cv::rgbd::registerDepth(in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, Rt, d_frame, t_frame.size(), registeredResult, dilatationC1);
+
+				//cv::rgbd::registerDepth(in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, Rt, d_frame, t_frame.size(), registeredResult, dilatationC1);
 				//pRegistration(d_frame, t_frame, in_color_cameraMatrix, in_thermal_camaeraMatrix, in_thermal_distCoeff, R, T, t_frame.size(), dilatationC1, depth_scale, registeredResult);
 
+				
 				/*cv::Mat x;
 				double min;
 				double max;
@@ -819,7 +821,7 @@ int main(int argc, char* argv[])
 				cv::Mat adjMap;
 
 				registeredResult.convertTo(adjMap, CV_8UC1, 255 / (max - min), -min);
-				applyColorMap(adjMap, x, cv::COLORMAP_PINK);
+				applyColorMap(adjMap, x, cv::COLORMAP_JET);
 				cv::Mat akn;
 				t_frame.convertTo(akn, CV_8U, 1 / 256.0);
 				cv::cvtColor(akn, akn, CV_GRAY2RGB);
@@ -990,16 +992,16 @@ void pRegistration(const cv::Mat& inputDataC1,
 	const float inputDepthToMetersScale,
 	cv::Mat& registeredResultC1)
 {
-	cv::Mat l = (cv::Mat_<float>(1, 4) << 0, 0, 0, 1);
-	cv::Mat s = (cv::Mat_<float>(3, 1) << 0, 0, 0);
+	cv::Mat l = (cv::Mat_<double>(1, 4) << 0, 0, 0, 1);
+	cv::Mat s = (cv::Mat_<double>(3, 1) << 0, 0, 0);
 
 	// Rigid-body transform
-	cv::Mat_<float> rbtRgb2Depth;
-	cv::Mat_<float> Tm = T.clone();
+	cv::Mat_<double> rbtRgb2Depth;
+	cv::Mat_<double> Tm = T.clone();
 
-	Tm.at<float>(0, 0) = T.at<float>(0, 0) * 0.001;
-	Tm.at<float>(1, 0) = T.at<float>(1, 0) * 0.001;
-	Tm.at<float>(2, 0) = T.at<float>(2, 0) * 0.001;
+	Tm.at<double>(0, 0) = T.at<double>(0, 0) * 0.001;
+	Tm.at<double>(1, 0) = T.at<double>(1, 0) * 0.001;
+	Tm.at<double>(2, 0) = T.at<double>(2, 0) * 0.001;
 
 	cv::hconcat(R, Tm, rbtRgb2Depth);
 	cv::vconcat(rbtRgb2Depth, l, rbtRgb2Depth);
@@ -1056,9 +1058,19 @@ void pRegistration(const cv::Mat& inputDataC1,
 					rescaled_depth = std::numeric_limits<float>::quiet_NaN();
 				}
 
-				point->x = (i - K.at<float>(0,2)) * rescaled_depth / K.at<float>(0, 0);
-				point->y = (j - K.at<float>(1,2)) * rescaled_depth / K.at<float>(1, 1);
+				point->x = (i - (float)K.at<double>(0,2)) * rescaled_depth / (float)K.at<double>(0, 0);
+				point->y = (j - (float)K.at<double>(1,2)) * rescaled_depth / (float)K.at<double>(1, 1);
 				point->z = rescaled_depth;
+
+				cv::Mat R1, T1;
+				R.convertTo(R1, CV_32F);
+				Tm.convertTo(T1, CV_32F);
+
+				cv::Mat ptMat = (cv::Mat_<float>(3, 1) << point->x, point->y, point->z);
+				
+				transformedCloud.at<cv::Point3f>(j, i) = (cv::Point3f)ptMat;
+
+				std::cout << transformedCloud.at<cv::Point3f>(j, i) << std::endl;
 
 			}
 		}
